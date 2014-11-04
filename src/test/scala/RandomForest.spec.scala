@@ -3,7 +3,25 @@ import com.ssjskipp.misc._
 
 class RandomForestSpec extends FunSuite {
 
-	test("Random forests should work") {
+	test("Building a random forest") {
+		// Stream some sine wave
+		def dataSource(f: Double => Double, step: Double): Stream[Seq[Double]] = {
+
+			def sample(theta: Double, f: Double => Double): Stream[Seq[Double]] =
+				Seq(theta, f(theta)) #:: sample(theta + step, f)
+			
+			sample(0, f)
+		}
+
+		val source = dataSource((x: Double) => Math.sin(x), Math.PI / 64).iterator
+		val featureSet = (0 until 1000).map(x => source.next())
+
+		// Build a forest with the (x, y) pair as the feature set
+		// and the (y) as truth results
+		val forest = RandomForest.makeForest[Double](featureSet, featureSet.map(_(1)), Some(Map("T" -> "25")))
+	}
+
+	test("EnsembleForest should deterministically work") {
 
 		val classifyRootA = SplitNode(
 			(x: Seq[Double]) => x(0) > 5,
@@ -49,65 +67,12 @@ class RandomForestSpec extends FunSuite {
 			"Positive"
 		)
 
+		// Assert data returns expectation
 		data.map(forest.process)
 			.zip(expectation)
 			.foreach(x =>
 				assert(x._1 == x._2)
 			)
-	}
-
-	test("Trivial classification tree should give expected results") {
-		
-		val leftDecide = ClassifyLeaf(
-			(x: Seq[Double]) => if (x(1) > 0) "Positive" else "Negative or Zero"
-		)
-		
-		val rightDecide = ClassifyLeaf(
-			(x: Seq[Double]) => if (x(1) < 0) "Negative" else "Positive or Zero"
-		)
-
-		val root = SplitNode(
-			(x: Seq[Double]) => x(0) > 5,
-			leftDecide,
-			rightDecide
-		)
-
-		val tree = new DecisionTree[String](root)
-
-		val sortRight = Seq(
-			Seq(0d, 15d),
-			Seq(1d, -15d),
-			Seq(-10d, -10d),
-			Seq(5d, 0d)
-		)
-
-		val answerRight = Seq(
-			"Positive or Zero",
-			"Negative",
-			"Negative",
-			"Positive or Zero"
-		)
-
-		val sortLeft = Seq(
-			Seq(15d, 10d),
-			Seq(5.001d, -15d),
-			Seq(7d, 0d)
-		)
-
-		val answerLeft = Seq(
-			"Positive",
-			"Negative or Zero",
-			"Negative or Zero"
-		)
-
-		val testData = sortLeft ++ sortRight
-		val expectation = answerLeft ++ answerRight
-
-		val results = testData.map(tree.process)
-
-		results.zip(expectation).foreach(
-			x => assert(x._1 == x._2)
-		)
 	}
 
 }
