@@ -2,6 +2,8 @@ package com.ssjskipp.thought;
 
 import java.io.FileWriter
 import com.ssjskipp.misc._
+import spray.json._
+import DefaultJsonProtocol._
 
 object main extends App {
 	val dest = new FileWriter("output/test.json");
@@ -19,13 +21,14 @@ object main extends App {
 
 	// Build a forest with the (x, y) pair as the feature set
 	// and the (y) as truth results
+	println(featureSet.take(10))
+
 	val forest = RandomForest.makeForest[Double](featureSet, featureSet.map(_(1)), Some(Map("T" -> "25")))
 
-	// See what the forest can spit out
-	for (i <- 1 until 10) {
-		val theta = i * (Math.PI / 2)
-		println(
-			forest( Seq(theta, Math.sin(theta)) )
-		)
-	}
+	// Run some data
+	val res = (-100 until 100).map(x => (x, forest(Seq(x)))).toJson
+
+	dest.write(res.compactPrint)
+
+	dest.flush()
 }

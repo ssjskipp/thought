@@ -65,42 +65,21 @@ object RandomForest extends ForestBuilder {
 		val numTrees = params.getOrElse(Map("T" -> "10")).getOrElse("T", "10").toInt
 		val maxDepth = params.getOrElse(Map("D" -> "5")).getOrElse("D", "5").toInt
 
-		// Bluh, averaging stuff is dumb
-		// I'm averaging each point left over
-		// Assumes last dimension is 'response' value
-		// @TODO: Make this better
-		def regressLeaf(data: Seq[Seq[Double]]): Seq[Double] => T = {
-			val len = data.length
-			val res = data.map(_.last).sum / len // Project tail value
-
-			// @Todo, make this an actual thing.
-			(x: Seq[Double]) => res.asInstanceOf[T]
-		}
-
-		// Provides a function that decides, given a data set, how to split on a feature
-		// Currently divides extent of a random dimension in half
-		// then splits on that dimension
-		def dumbSplit(data: Seq[Seq[Double]]): Seq[Double] =>	Boolean = {
-			val dim = rand.nextInt(data(0).size - 1)
-			val min = data.minBy(x => x(dim)).apply(dim)
-			val max = data.maxBy(x => x(dim)).apply(dim)
-			val split = (max - min) / 2
-			(x: Seq[Double]) => x(dim) >= split
-		}
-
 		// Divide test set into 2 parts, one to build forest (true), one to train forest (false)
 		val dataSplit = data.zipWithIndex
 				.map(x => (rand.nextDouble <= 0.66, x))
 				.groupBy(x => x._1)
 
-		// Build forest with the 'true' split (2/3)
+		// Make numTrees trees
 		val trees: Seq[DecisionTree[T]] = (0 until numTrees).flatMap { i =>
+			
+			// Divide into 2 sets, just like the forest
 			val treeDataSplit = dataSplit(true).map(_._2._1)
 				.zipWithIndex
-				.map(x => (rand.nextDouble <= 0.33, x))
+				.map(x => (rand.nextDouble <= 0.66, x))
 				.groupBy(x => x._1)
 
-			// Build tree with the 'true' split (1/3)
+			// Build tree with the 'true' split
 			val tree = TreeBuilder.buildTree[T](
 				treeDataSplit(true).map(_._2._1),
 				regressLeaf,
@@ -108,8 +87,9 @@ object RandomForest extends ForestBuilder {
 				Some(Map("maxDepth" -> 5))
 			)
 
-			// Train tree with the 'false' split (2/3)
+			// Train tree with the 'false' split
 			// @TODO: Train tree
+
 
 			// Return
 			Seq(tree)
@@ -120,12 +100,35 @@ object RandomForest extends ForestBuilder {
 		val weights = (0 until trees.length).map(x => 1d).toSeq
 
 		val doubleCluster = (x: T) => {
-			(x.asInstanceOf[Double] / 10d).floor.toString
+			(x.asInstanceOf[Double]).toString
 		}
 
 		// Return the new random forest
 		new EnsembleForest[T](trees,
 			weights,
 			doubleCluster)
+	}
+
+	// Bluh, averaging stuff is dumb
+	// I'm averaging each point left over
+	// Assumes last dimension is 'response' value
+	// @TODO: Make this better
+	def regressLeaf[T](data: Seq[Seq[Double]]): Seq[Double] => T = {
+		val len = data.length
+		val res = data.map(_.last).sum / len // Project tail value
+
+		// @Todo, make this an actual thing.
+		(x: Seq[Double]) => res.asInstanceOf[T]
+	}
+
+	// Provides a function that decides, given a data set, how to split on a feature
+	// Currently divides extent of a random dimension in half
+	// then splits on that dimension
+	def dumbSplit[T](data: Seq[Seq[Double]]): Seq[Double] =>	Boolean = {
+		val dim = rand.nextInt(data(0).size - 1)
+		val min = data.minBy(x => x(dim)).apply(dim)
+		val max = data.maxBy(x => x(dim)).apply(dim)
+		val split = (max - min) / 2
+		(x: Seq[Double]) => x(dim) <= split
 	}
 }
