@@ -1,9 +1,12 @@
 import org.scalatest.FunSuite
 import com.ssjskipp.misc._
+import scala.util.Random;
 
 class RandomForestSpec extends FunSuite {
 
-	test("Building a random forest") {
+	val rand = new Random()
+
+	test("RandomForest should be able to be built and tested") {
 		// Stream some sine wave
 		def dataSource(f: Double => Double, step: Double): Stream[Seq[Double]] = {
 
@@ -19,6 +22,9 @@ class RandomForestSpec extends FunSuite {
 		// Build a forest with the (x, y) pair as the feature set
 		// and the (y) as truth results
 		val forest = RandomForest.makeForest[Double](featureSet, featureSet.map(_(1)), Some(Map("T" -> "25")))
+
+		// Should also be able to... run?
+		val testData = (0 until 100).map(x => Seq(rand.nextDouble)).map(forest.apply)
 	}
 
 	test("EnsembleForest should deterministically work") {
@@ -48,7 +54,9 @@ class RandomForestSpec extends FunSuite {
 			Seq(new DecisionTree[String](classifyRootA),
 				new DecisionTree[String](classifyRootB)),
 			// Weights
-			Seq(0.40, 0.60)
+			Seq(0.40, 0.60),
+			// Cluster
+			(x: String) => x
 			)
 
 		val data = Seq(

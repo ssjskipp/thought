@@ -11,33 +11,37 @@ import scala.annotation.tailrec;
 trait ForestBuilder {
 	def makeForest[T](data: Seq[Seq[Double]],
 		truth: Seq[T],
-		params: Option[Map[String, String]]): Iterable[DecisionTree[T]];
+		params: Option[Map[String, String]]): EnsembleForest[T];
 }
 
 /**
  * Collection of weighted decision trees of a shared type for ensemble voting
+ * Can use a grouping function to better group tree results (perhaps rounding?)
  */
-class EnsembleForest[T](trees: Seq[DecisionTree[T]], weights: Seq[Double]) {
+class EnsembleForest[T](trees: Seq[DecisionTree[T]], weights: Seq[Double],
+	clusterFunc: (T => String)) {
 
 	def process(x: Seq[Double]): T = {
-		val votes = trees							// For each tree
+		val cluster = trees						// Each tree is a vote to cluster
 			.map(tree => tree(x))				// Apply the tree to data
 			.zip(weights)								// Zip with weights
-			.groupBy(_._1)							// Group by the result
-			.mapValues(x => {						// Reduce group values to vote
+			.groupBy[String](						// Group by the result of the grouping function
+				d => clusterFunc(d._1))
+		
+		val votes = cluster
+			.mapValues(x => {						// Reduce each group's values to count votes
 				x.map(y => y._2)					// Project vote value out of tuple
 				.reduce((a, b) => a + b)	// Sum votes for result class
 			})
 
-		// Grab class with maximum vote value
-		// Then project result out
-		votes.maxBy(x => x._2)
-			._1
+		val winningCluster = votes.zipWithIndex.maxBy(x => x._1._2)
+
+		// For now, give head of winning cluster
+		cluster(winningCluster._1._1)(0)._1		// I'M SORRY FOR ALL THIS PROJECTION
 	}
 
 	def apply(x: Seq[Double]) = process(x)
 }
-
 
 /**
  * Builder for random forests.
@@ -56,58 +60,72 @@ object RandomForest extends ForestBuilder {
 	 */
 	override def makeForest[T](data: Seq[Seq[Double]],
 		truth: Seq[T],
-		params: Option[Map[String, String]] = None): Iterable[DecisionTree[T]] = {
+		params: Option[Map[String, String]] = None): EnsembleForest[T] = {
 		
 		val numTrees = params.getOrElse(Map("T" -> "10")).getOrElse("T", "10").toInt
 		val maxDepth = params.getOrElse(Map("D" -> "5")).getOrElse("D", "5").toInt
-		
-		(0 until numTrees).flatMap { i =>
-			val dataSubset = data.zipWithIndex
+
+		// Bluh, averaging stuff is dumb
+		// I'm averaging each point left over
+		// Assumes last dimension is 'response' value
+		// @TODO: Make this better
+		def regressLeaf(data: Seq[Seq[Double]]): Seq[Double] => T = {
+			val len = data.length
+			val res = data.map(_.last).sum / len // Project tail value
+
+			// @Todo, make this an actual thing.
+			(x: Seq[Double]) => res.asInstanceOf[T]
+		}
+
+		// Provides a function that decides, given a data set, how to split on a feature
+		// Currently divides extent of a random dimension in half
+		// then splits on that dimension
+		def dumbSplit(data: Seq[Seq[Double]]): Seq[Double] =>	Boolean = {
+			val dim = rand.nextInt(data(0).size - 1)
+			val min = data.minBy(x => x(dim)).apply(dim)
+			val max = data.maxBy(x => x(dim)).apply(dim)
+			val split = (max - min) / 2
+			(x: Seq[Double]) => x(dim) >= split
+		}
+
+		// Divide test set into 2 parts, one to build forest (true), one to train forest (false)
+		val dataSplit = data.zipWithIndex
+				.map(x => (rand.nextDouble <= 0.66, x))
+				.groupBy(x => x._1)
+
+		// Build forest with the 'true' split (2/3)
+		val trees: Seq[DecisionTree[T]] = (0 until numTrees).flatMap { i =>
+			val treeDataSplit = dataSplit(true).map(_._2._1)
+				.zipWithIndex
 				.map(x => (rand.nextDouble <= 0.33, x))
 				.groupBy(x => x._1)
 
-			Seq(makeTree[T](dataSubset(true).map(_._2._1), maxDepth))
+			// Build tree with the 'true' split (1/3)
+			val tree = TreeBuilder.buildTree[T](
+				treeDataSplit(true).map(_._2._1),
+				regressLeaf,
+				dumbSplit,
+				Some(Map("maxDepth" -> 5))
+			)
+
+			// Train tree with the 'false' split (2/3)
+			// @TODO: Train tree
+
+			// Return
+			Seq(tree)
 		}
-	}
 
-	private def makeTree[T](data: Seq[Seq[Double]],
-		maxDepth: Int) = {
+		// Train the collection of trees with the 'false' split (1/3)
+		// @TODO: Weight forest
+		val weights = (0 until trees.length).map(x => 1d).toSeq
 
-		val minLength = 5;
-
-		def step(data: Seq[Seq[Double]], depth: Int = 0): Node[Any] = {
-			if (data.length < minLength || depth >= maxDepth) {
-				// Leaf
-				RegressionLeaf(regressOn(data))
-			} else {
-				// Split node
-				val split = splitOn(data)
-				val left = data.filter(x => split(x))
-				val right = data.filter(x => !split(x))
-				
-				SplitNode(splitOn(data),
-					step(left, depth + 1),
-					step(right, depth + 1))
-			}
+		val doubleCluster = (x: T) => {
+			(x.asInstanceOf[Double] / 10d).floor.toString
 		}
-		
-		new DecisionTree[T](step(data))
-	}
 
-	// Bluh, averaging stuff is dumb
-	private def regressOn(data: Seq[Seq[Double]]): Seq[Double] => Double = {
-		val len = data.length
-		val res = data.map(_(1)).sum / len
-
-		(x: Seq[Double]) => res
-	}
-
-	// Provides a function that decides, given a data set, how to split on a feature
-	private def splitOn(data: Seq[Seq[Double]]): Seq[Double] =>	Boolean = {
-		val dim = rand.nextInt(data(0).size)
-		val min = data.minBy(x => x(dim)).apply(dim)
-		val max = data.maxBy(x => x(dim)).apply(dim)
-		val split = (max - min) / 2
-		(x: Seq[Double]) => x(dim) >= split
+		// Return the new random forest
+		new EnsembleForest[T](trees,
+			weights,
+			doubleCluster)
 	}
 }
